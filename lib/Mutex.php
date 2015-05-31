@@ -10,7 +10,10 @@ use function Amp\pipe;
 
 class Mutex {
     const LOCK = <<<LOCK
-if redis.call("llen",KEYS[1]) > 0 and redis.call("ttl",KEYS[1]) >= 0 or redis.call("llen",KEYS[2]) > 0 then
+if redis.call("llen",KEYS[1]) > 0 and redis.call("ttl",KEYS[1]) >= 0 then
+    return redis.call("lindex",KEYS[1],0) == ARGV[1]
+elseif redis.call("ttl",KEYS[1]) == -1 then
+    redis.call("pexpire",KEYS[1],ARGV[2])
     return 0
 else
     redis.call("del",KEYS[1])
@@ -19,6 +22,18 @@ else
     return 1
 end
 LOCK;
+
+    const TOKEN = <<<TOKEN
+if redis.call("lindex",KEYS[1],0) == "" then
+    redis.call("del",KEYS[1])
+    redis.call("lpush",KEYS[1],ARGV[1])
+    redis.call("pexpire",KEYS[1],ARGV[2])
+    return 1
+else
+    return {err="Redis lock error"}
+end
+TOKEN;
+
 
     const UNLOCK = <<<UNLOCK
 if redis.call("lindex",KEYS[1],0) == ARGV[1] then
@@ -77,7 +92,7 @@ RENEW;
     }
 
     public function lock ($id, $token, $ttl = 1000, $timeout = 0): Promise {
-        return pipe($this->std->eval(self::LOCK, ["lock:{$id}", "queue:{$id}"], [$token, $ttl]), function ($result) use ($id, $ttl, $timeout) {
+        return pipe($this->std->eval(self::LOCK, ["lock:{$id}", "queue:{$id}"], [$token, $ttl]), function ($result) use ($id, $token, $ttl, $timeout) {
             if ($result) {
                 return true;
             } else {
@@ -87,12 +102,12 @@ RENEW;
                     $this->readyConnections[] = $connection;
                 });
 
-                return pipe($promise, function ($result) use ($id, $ttl) {
+                return pipe($promise, function ($result) use ($id, $token, $ttl) {
                     if ($result === null) {
                         return new Failure(new Exception);
                     }
 
-                    return $this->std->expire("lock:{$id}", $ttl, true);
+                    return $this->std->eval(self::TOKEN, ["lock:{$id}"], [$token, $ttl]);
                 });
             }
         });
