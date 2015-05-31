@@ -94,7 +94,7 @@ RENEW;
                         return new Failure(new Exception);
                     }
 
-                    return $this->std->expire("lock:{$id}", $ttl);
+                    return $this->std->expire("lock:{$id}", $ttl, true);
                 });
             }
         });
