@@ -33,7 +33,7 @@ class MutexTest extends PHPUnit_Framework_TestCase {
             } catch (\Exception $e) {
                 return;
             } finally {
-                yield $mutex->stopAll();
+                $mutex->stopAll();
             }
 
             $this->fail("lock must throw");
@@ -85,7 +85,7 @@ class MutexTest extends PHPUnit_Framework_TestCase {
             } catch (\Exception $e) {
                 return;
             } finally {
-                yield $mutex->stopAll();
+                $mutex->stopAll();
             }
 
             $this->fail("lock must throw");

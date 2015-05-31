@@ -5,7 +5,6 @@ namespace Amp\Redis;
 use Amp\Failure;
 use Amp\Promise;
 use Amp\Reactor;
-use Exception;
 use function Amp\pipe;
 
 class Mutex {
@@ -57,8 +56,10 @@ RENEW;
 
     /** @var Client */
     private $std;
+    /** @var array */
+    private $busyConnectionMap;
     /** @var Client[] */
-    private $connections;
+    private $busyConnections;
     /** @var Client[] */
     private $readyConnections;
     /** @var int */
@@ -67,30 +68,51 @@ RENEW;
     private $ttl;
     /** @var int */
     private $timeout;
+    /** @var string */
+    private $watcher;
 
     public function __construct (string $uri, array $options, Reactor $reactor = null) {
         $this->uri = $uri;
         $this->options = $options;
-        $this->reactor = $reactor;
+        $this->reactor = $reactor ?: \Amp\reactor();
 
         $this->std = new Client($uri, $options["password"] ?? null, $reactor);
         $this->maxConnections = $options["max_connections"] ?? 0;
         $this->ttl = $options["ttl"] ?? 1000;
         $this->timeout = (int) (($options["timeout"] ?? 1000) / 1000);
         $this->readyConnections = [];
-        $this->connections = [];
+        $this->busyConnections = [];
+        $this->busyConnectionMap = [];
+
+        $this->watcher = $this->reactor->repeat(function () {
+            $now = time();
+            $unused = $now - 60;
+
+            foreach ($this->readyConnections as $key => list($time, $connection)) {
+                if ($time > $unused) {
+                    break;
+                }
+
+                unset($this->readyConnections[$key]);
+                $connection->close();
+            }
+        }, 5000);
     }
 
     protected function getReadyConnection () {
         $connection = array_pop($this->readyConnections);
+        $connection = $connection[1] ?? null;
 
         if (!$connection) {
-            if ($this->maxConnections && count($this->connections) + 1 === $this->maxConnections) {
-                throw new Exception;
+            if ($this->maxConnections && count($this->busyConnections) + 1 === $this->maxConnections) {
+                throw new ConnectionLimitException;
             }
 
             $connection = new Client($this->uri, $this->options["password"] ?? null, $this->reactor);
-            $this->connections[] = $connection;
+            $this->busyConnections[] = $connection;
+
+            end($this->busyConnections);
+            $this->busyConnectionMap[spl_object_hash($connection)] = key($this->busyConnections);
         }
 
         return $connection;
@@ -105,12 +127,20 @@ RENEW;
                     $connection = $this->getReadyConnection();
                     $promise = $connection->brPoplPush("queue:{$id}", "lock:{$id}", $this->timeout);
                     $promise->when(function () use ($connection) {
-                        $this->readyConnections[] = $connection;
+                        $hash = spl_object_hash($connection);
+                        $key = $this->busyConnectionMap[$hash] ?? null;
+
+                        if ($key) {
+                            unset($this->busyConnections[$key]);
+                            unset($this->busyConnectionMap[$hash]);
+                        }
+
+                        $this->readyConnections[] = [time(), $connection];
                     });
 
                     return pipe($promise, function ($result) use ($id, $token) {
                         if ($result === null) {
-                            return new Failure(new Exception);
+                            return new Failure(new LockException);
                         }
 
                         return $this->std->eval(self::TOKEN, ["lock:{$id}"], [$token, $this->ttl]);
@@ -129,9 +159,14 @@ RENEW;
     }
 
     public function stopAll () {
+        $this->reactor->cancel($this->watcher);
         $promises = [$this->std->close()];
 
-        foreach ($this->connections as $connection) {
+        foreach ($this->busyConnections as $connection) {
+            $promises[] = $connection->close();
+        }
+
+        foreach ($this->readyConnections as list($time, $connection)) {
             $promises[] = $connection->close();
         }
 
