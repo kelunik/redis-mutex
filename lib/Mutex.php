@@ -76,7 +76,7 @@ RENEW;
         $this->std = new Client($uri, $options["password"] ?? null, $reactor);
         $this->maxConnections = $options["max_connections"] ?? 0;
         $this->ttl = $options["ttl"] ?? 1000;
-        $this->timeout = (int) ($options["timeout"] / 1000 ?? 1);
+        $this->timeout = (int) (($options["timeout"] ?? 1000) / 1000);
         $this->readyConnections = [];
         $this->connections = [];
     }
