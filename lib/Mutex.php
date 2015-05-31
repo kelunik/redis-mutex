@@ -88,6 +88,9 @@ RENEW;
             $now = time();
             $unused = $now - 60;
 
+            var_dump("open:" . count($this->readyConnections));
+            var_dump("busy:" . count($this->busyConnections));
+
             foreach ($this->readyConnections as $key => list($time, $connection)) {
                 if ($time > $unused) {
                     break;
@@ -109,11 +112,13 @@ RENEW;
             }
 
             $connection = new Client($this->uri, $this->options["password"] ?? null, $this->reactor);
-            $this->busyConnections[] = $connection;
-
-            end($this->busyConnections);
-            $this->busyConnectionMap[spl_object_hash($connection)] = key($this->busyConnections);
         }
+
+        $this->busyConnections[] = $connection;
+        end($this->busyConnections);
+
+        $hash = spl_object_hash($connection);
+        $this->busyConnectionMap[$hash] = key($this->busyConnections);
 
         return $connection;
     }
@@ -130,10 +135,8 @@ RENEW;
                         $hash = spl_object_hash($connection);
                         $key = $this->busyConnectionMap[$hash] ?? null;
 
-                        if ($key) {
-                            unset($this->busyConnections[$key]);
-                            unset($this->busyConnectionMap[$hash]);
-                        }
+                        unset($this->busyConnections[$key]);
+                        unset($this->busyConnectionMap[$hash]);
 
                         $this->readyConnections[] = [time(), $connection];
                     });
