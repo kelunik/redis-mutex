@@ -5,7 +5,6 @@ namespace Amp\Redis;
 use Amp\Failure;
 use Amp\Promise;
 use Amp\Reactor;
-use Amp\Success;
 use Exception;
 use function Amp\pipe;
 
@@ -21,7 +20,6 @@ else
 end
 LOCK;
 
-
     const UNLOCK = <<<UNLOCK
 if redis.call("lindex",KEYS[1],0) == ARGV[1] then
     redis.call("del",KEYS[1])
@@ -33,7 +31,7 @@ UNLOCK;
 
     const RENEW = <<<RENEW
 if redis.call("lindex",KEYS[1],0) == ARGV[1] then
-    return redis.call("pexpire",KEYS[1],ARGV[1])
+    return redis.call("pexpire",KEYS[1],ARGV[2])
 else
     return 0
 end
