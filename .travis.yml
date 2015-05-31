@@ -1,6 +1,7 @@
 language: php
 php:
   - 7.0
+install: composer install
 before_script:
-  - composer install
+  - redis-server --daemonize yes
 script: vendor/bin/phpunit
