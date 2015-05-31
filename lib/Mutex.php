@@ -24,7 +24,7 @@ end
 LOCK;
 
     const TOKEN = <<<TOKEN
-if redis.call("lindex",KEYS[1],0) == "" then
+if redis.call("lindex",KEYS[1],0) == "%" then
     redis.call("del",KEYS[1])
     redis.call("lpush",KEYS[1],ARGV[1])
     redis.call("pexpire",KEYS[1],ARGV[2])
@@ -34,13 +34,12 @@ else
 end
 TOKEN;
 
-
     const UNLOCK = <<<UNLOCK
 if redis.call("lindex",KEYS[1],0) == ARGV[1] then
     redis.call("del",KEYS[1])
-    return redis.call("lpush",KEYS[2],"")
-else
-    return 0
+    redis.call("lpush",KEYS[2],"%")
+    redis.call("pexpire",KEYS[2],ARGV[2])
+    return redis.call("llen",KEYS[2])
 end
 UNLOCK;
 
@@ -62,8 +61,12 @@ RENEW;
     private $connections;
     /** @var Client[] */
     private $readyConnections;
-    /** @var bool int */
+    /** @var int */
     private $maxConnections;
+    /** @var int */
+    private $ttl;
+    /** @var int */
+    private $timeout;
 
     public function __construct (string $uri, array $options, Reactor $reactor = null) {
         $this->uri = $uri;
@@ -72,8 +75,10 @@ RENEW;
 
         $this->std = new Client($uri, $options["password"] ?? null, $reactor);
         $this->maxConnections = $options["max_connections"] ?? 0;
-        $this->connections = [];
+        $this->ttl = $options["ttl"] ?? 1000;
+        $this->timeout = (int) ($options["timeout"] / 1000 ?? 1);
         $this->readyConnections = [];
+        $this->connections = [];
     }
 
     protected function getReadyConnection () {
@@ -91,34 +96,36 @@ RENEW;
         return $connection;
     }
 
-    public function lock ($id, $token, $ttl = 1000, $timeout = 0): Promise {
-        return pipe($this->std->eval(self::LOCK, ["lock:{$id}", "queue:{$id}"], [$token, $ttl]), function ($result) use ($id, $token, $ttl, $timeout) {
+    public function lock ($id, $token): Promise {
+        return pipe($this->std->eval(self::LOCK, ["lock:{$id}", "queue:{$id}"], [$token, $this->ttl]), function ($result) use ($id, $token) {
             if ($result) {
                 return true;
             } else {
-                $connection = $this->getReadyConnection();
-                $promise = $connection->brPoplPush("queue:{$id}", "lock:{$id}", $timeout);
-                $promise->when(function () use ($connection) {
-                    $this->readyConnections[] = $connection;
-                });
+                return pipe($this->std->expire("queue:{$id}", $this->timeout * 2, true), function () use ($id, $token) {
+                    $connection = $this->getReadyConnection();
+                    $promise = $connection->brPoplPush("queue:{$id}", "lock:{$id}", $this->timeout);
+                    $promise->when(function () use ($connection) {
+                        $this->readyConnections[] = $connection;
+                    });
 
-                return pipe($promise, function ($result) use ($id, $token, $ttl) {
-                    if ($result === null) {
-                        return new Failure(new Exception);
-                    }
+                    return pipe($promise, function ($result) use ($id, $token) {
+                        if ($result === null) {
+                            return new Failure(new Exception);
+                        }
 
-                    return $this->std->eval(self::TOKEN, ["lock:{$id}"], [$token, $ttl]);
+                        return $this->std->eval(self::TOKEN, ["lock:{$id}"], [$token, $this->ttl]);
+                    });
                 });
             }
         });
     }
 
     public function unlock ($id, $token): Promise {
-        return $this->std->eval(self::UNLOCK, ["lock:{$id}", "queue:{$id}"], [$token]);
+        return $this->std->eval(self::UNLOCK, ["lock:{$id}", "queue:{$id}"], [$token, 2 * $this->timeout]);
     }
 
-    public function renew ($id, $token, $ttl = 1000): Promise {
-        return $this->std->eval(self::RENEW, ["lock:{$id}"], [$token, $ttl]);
+    public function renew ($id, $token): Promise {
+        return $this->std->eval(self::RENEW, ["lock:{$id}"], [$token, $this->ttl]);
     }
 
     public function stopAll () {
@@ -129,5 +136,13 @@ RENEW;
         }
 
         return \Amp\any($promises);
+    }
+
+    public function getTTL () {
+        return $this->ttl;
+    }
+
+    public function getTimeout () {
+        return $this->timeout;
     }
 }
