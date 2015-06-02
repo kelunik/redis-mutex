@@ -13,8 +13,8 @@ try {
     $token = uniqid("", true);
     yield $mutex->lock($sessionId, $token);
 
-    // code here will only be executed in one client at a time
-    // if it takes longer than your specified TTL, you have to
+    // Code here will only be executed in one client at a time.
+    // If it takes longer than your specified TTL, you have to
     // renew the lock, see next example.
 
     yield $mutex->unlock($sessionId, $token);
@@ -42,9 +42,11 @@ try {
     yield $mutex->lock($sessionId, $token);
     $locks[$sessionId] = $token;
 
-    // code here will only be executed in one client at a time
-    // if it takes longer than your specified TTL, you have to
-    // renew the lock, see next example.
+    // Code here will only be executed in one client at a time.
+    // Your lock will automatically be renewed by the reactor
+    // repeat above. Don't do blocking things here (you should never
+    // do that with Amp anyway), otherwise the reactor will not
+    // be able to schedule the renewal.
 
     unset($locks[$sessionId]);
     yield $mutex->unlock($sessionId, $token);

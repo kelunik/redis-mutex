@@ -222,7 +222,15 @@ RENEW;
         return $this->std->eval(self::RENEW, ["lock:{$id}"], [$token, $this->ttl]);
     }
 
-    public function stopAll () {
+    /**
+     * Shut down the mutex client.
+     *
+     * Be sure to release all locks you acquired before,
+     * so other clients will be able to acquire them.
+     *
+     * @return Promise
+     */
+    public function shutdown () : Promise {
         $this->reactor->cancel($this->watcher);
         $promises = [$this->std->close()];
 
