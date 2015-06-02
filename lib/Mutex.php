@@ -88,9 +88,6 @@ RENEW;
             $now = time();
             $unused = $now - 60;
 
-            var_dump("open:" . count($this->readyConnections));
-            var_dump("busy:" . count($this->busyConnections));
-
             foreach ($this->readyConnections as $key => list($time, $connection)) {
                 if ($time > $unused) {
                     break;
