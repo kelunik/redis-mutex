@@ -13,7 +13,7 @@ class MutexTest extends PHPUnit_Framework_TestCase {
      */
     public function setUp () {
         (new NativeReactor())->run(function ($reactor) {
-            $client = new Client("tcp://127.0.0.1:6379", null, $reactor);
+            $client = new Client("tcp://127.0.0.1:6379", [], $reactor);
             yield $client->flushAll();
             yield $client->close();
         });

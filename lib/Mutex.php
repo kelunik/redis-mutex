@@ -97,7 +97,7 @@ RENEW;
         $this->options = $options;
         $this->reactor = $reactor ?: \Amp\reactor();
 
-        $this->std = new Client($uri, $options["password"] ?? null, $reactor);
+        $this->std = new Client($uri, isset($options["password"]) ? ["password" => $options["password"]] : [], $reactor);
         $this->maxConnections = $options["max_connections"] ?? 0;
         $this->ttl = $options["ttl"] ?? 1000;
         $this->timeout = (int) (($options["timeout"] ?? 1000) / 1000);
@@ -140,7 +140,8 @@ RENEW;
                 throw new ConnectionLimitException;
             }
 
-            $connection = new Client($this->uri, $this->options["password"] ?? null, $this->reactor);
+            $connection = new Client($this->uri, isset($this->options["password"])
+                ? ["password" => $this->options["password"]] : [], $this->reactor);
         }
 
         $this->busyConnections[] = $connection;
