@@ -4,8 +4,10 @@ namespace Amp\Redis;
 
 use Amp\Failure;
 use Amp\Promise;
-use Amp\Reactor;
+use function Amp\all;
+use function Amp\cancel;
 use function Amp\pipe;
+use function Amp\repeat;
 
 /**
  * Mutex can be used to create locks for mutual exclusion in distributed clients.
@@ -59,8 +61,6 @@ RENEW;
     private $uri;
     /** @var array */
     private $options;
-    /** @var Reactor */
-    private $reactor;
     /** @var Client */
     private $std;
     /** @var array */
@@ -90,14 +90,12 @@ RENEW;
      * @type int timeout timeout for blocking lock wait
      * @type int $ttl key ttl for created locks and lock renews
      * }
-     * @param Reactor $reactor
      */
-    public function __construct (string $uri, array $options, Reactor $reactor = null) {
+    public function __construct (string $uri, array $options) {
         $this->uri = $uri;
         $this->options = $options;
-        $this->reactor = $reactor ?: \Amp\reactor();
 
-        $this->std = new Client($uri, isset($options["password"]) ? ["password" => $options["password"]] : [], $reactor);
+        $this->std = new Client($uri, isset($options["password"]) ? ["password" => $options["password"]] : []);
         $this->maxConnections = $options["max_connections"] ?? 0;
         $this->ttl = $options["ttl"] ?? 1000;
         $this->timeout = (int) (($options["timeout"] ?? 1000) / 1000);
@@ -105,7 +103,7 @@ RENEW;
         $this->busyConnections = [];
         $this->busyConnectionMap = [];
 
-        $this->watcher = $this->reactor->repeat(function () {
+        $this->watcher = repeat(function () {
             $now = time();
             $unused = $now - 60;
 
@@ -140,8 +138,10 @@ RENEW;
                 throw new ConnectionLimitException;
             }
 
-            $connection = new Client($this->uri, isset($this->options["password"])
-                ? ["password" => $this->options["password"]] : [], $this->reactor);
+            $connection = new Client(
+                $this->uri,
+                isset($this->options["password"]) ? ["password" => $this->options["password"]] : []
+            );
         }
 
         $this->busyConnections[] = $connection;
@@ -232,7 +232,7 @@ RENEW;
      * @return Promise
      */
     public function shutdown () : Promise {
-        $this->reactor->cancel($this->watcher);
+        cancel($this->watcher);
         $promises = [$this->std->close()];
 
         foreach ($this->busyConnections as $connection) {
@@ -243,7 +243,7 @@ RENEW;
             $promises[] = $connection->close();
         }
 
-        return \Amp\any($promises);
+        return all($promises);
     }
 
     /**
