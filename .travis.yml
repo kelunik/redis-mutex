@@ -19,11 +19,11 @@ before_script:
   - redis-server --daemonize yes
 
 script:
-  # Currently no tests: phpdbg -qrr vendor/bin/phpunit --coverage-text --coverage-clover build/logs/clover.xml
+  - phpdbg -qrr vendor/bin/phpunit --coverage-text --coverage-clover build/logs/clover.xml
   - PHP_CS_FIXER_IGNORE_ENV=1 php vendor/bin/php-cs-fixer --diff --dry-run -v fix
 
 after_script:
-  # Currently no tests: php vendor/bin/coveralls -v
+  - php vendor/bin/coveralls -v
 
 cache:
   directories:
