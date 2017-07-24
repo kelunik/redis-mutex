@@ -2,12 +2,12 @@
 
 namespace Kelunik\RedisMutex;
 
-use function Amp\call;
 use Amp\Failure;
 use Amp\Loop;
 use Amp\Promise;
-use function Amp\Promise\all;
 use Amp\Redis\Client;
+use function Amp\call;
+use function Amp\Promise\all;
 
 /**
  * Mutex can be used to create locks for mutual exclusion in distributed clients.
@@ -81,14 +81,15 @@ RENEW;
     /**
      * Constructs a new Mutex instance. A single instance can be used to create as many locks as you need.
      *
-     * @param string $uri URI of the Redis server instance, e.g. tcp://localhost:6379
-     * @param array $options {
+     * @param string     $uri URI of the Redis server instance, e.g. tcp://localhost:6379
+     * @param array      $options {
      *      General options for this instance.
      *
      * @type string|null $password password for the Redis server
-     * @type int $max_connections maximum of concurrent Redis connections waiting for a lock with blocking commands
+     * @type int         $max_connections maximum of concurrent Redis connections waiting for a lock with blocking
+     *     commands
      * @type int timeout timeout for blocking lock wait
-     * @type int $ttl key ttl for created locks and lock renews
+     * @type int         $ttl key ttl for created locks and lock renews
      * }
      */
     public function __construct(string $uri, array $options = []) {
@@ -203,6 +204,7 @@ RENEW;
      *
      * @param string $id specific lock ID.
      * @param string $token unique token provided during {@link lock()}.
+     *
      * @return Promise promise fails if lock couldn't be acquired, otherwise resolves normally.
      */
     public function unlock($id, $token): Promise {
@@ -216,6 +218,7 @@ RENEW;
      *
      * @param string $id specific lock ID.
      * @param string $token unique token provided during {@link lock()}.
+     *
      * @return Promise promise fails if lock couldn't be renewed, otherwise resolves normally.
      */
     public function renew($id, $token): Promise {

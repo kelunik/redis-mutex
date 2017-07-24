@@ -10,7 +10,7 @@ $mutex = new Mutex(...);
 // ...
 
 try {
-    $token = uniqid("", true);
+    $token = bin2hex(random_bytes(16));
     yield $mutex->lock($sessionId, $token);
 
     // Code here will only be executed in one client at a time.
@@ -29,16 +29,16 @@ try {
 $mutex = new Mutex(...);
 $locks = [];
 
-$reactor->repeat(function () use ($mutex, $locks) {
+Loop::repeat(1000, function () use ($mutex, $locks) {
     foreach ($locks as $id => $token) {
         $mutex->renew($id, $token);
     }
-}, 1000);
+});
 
 // ...
 
 try {
-    $token = uniqid("", true);
+    $token = bin2hex(random_bytes(16));
     yield $mutex->lock($sessionId, $token);
     $locks[$sessionId] = $token;
 
