@@ -1,13 +1,13 @@
 <?php
 
-namespace Amp\Redis;
+namespace Kelunik\RedisMutex;
 
+use function Amp\call;
 use Amp\Failure;
+use Amp\Loop;
 use Amp\Promise;
-use function Amp\all;
-use function Amp\cancel;
-use function Amp\pipe;
-use function Amp\repeat;
+use function Amp\Promise\all;
+use Amp\Redis\Client;
 
 /**
  * Mutex can be used to create locks for mutual exclusion in distributed clients.
@@ -91,11 +91,11 @@ RENEW;
      * @type int $ttl key ttl for created locks and lock renews
      * }
      */
-    public function __construct (string $uri, array $options) {
+    public function __construct(string $uri, array $options = []) {
         $this->uri = $uri;
         $this->options = $options;
 
-        $this->std = new Client($uri, isset($options["password"]) ? ["password" => $options["password"]] : []);
+        $this->std = new Client($uri);
         $this->maxConnections = $options["max_connections"] ?? 0;
         $this->ttl = $options["ttl"] ?? 1000;
         $this->timeout = (int) (($options["timeout"] ?? 1000) / 1000);
@@ -103,8 +103,8 @@ RENEW;
         $this->busyConnections = [];
         $this->busyConnectionMap = [];
 
-        $this->watcher = repeat(function () {
-            $now = time();
+        $this->watcher = Loop::repeat(5000, function () {
+            $now = \time();
             $unused = $now - 60;
 
             foreach ($this->readyConnections as $key => list($time, $connection)) {
@@ -115,21 +115,22 @@ RENEW;
                 unset($this->readyConnections[$key]);
                 $connection->close();
             }
-        }, 5000);
+        });
     }
 
     /**
      * Get a ready connection instance.
      *
-     * If possible, uses the most recent connection that's no longer used, so older connections will
-     * be closed when not used anymore. If there's no connection available, it creates a new one as long as
-     * the max. connections limit allows it.
+     * If possible, uses the most recent connection that's no longer used, so older connections will be closed when not
+     * used anymore. If there's no connection available, it creates a new one as long as the max. connections limit
+     * allows it.
      *
      * @return Client ready connection to be used for blocking commands.
-     * @throws ConnectionLimitException if there's no ready connection and
-     * no new connection could be created because of a max. connections limit.
+     *
+     * @throws ConnectionLimitException if there's no ready connection and no new connection could be created because of
+     * a max. connections limit.
      */
-    protected function getReadyConnection () {
+    protected function getReadyConnection() {
         $connection = array_pop($this->readyConnections);
         $connection = $connection[1] ?? null;
 
@@ -139,8 +140,7 @@ RENEW;
             }
 
             $connection = new Client(
-                $this->uri,
-                isset($this->options["password"]) ? ["password" => $this->options["password"]] : []
+                $this->uri
             );
         }
 
@@ -156,43 +156,42 @@ RENEW;
     /**
      * Tries to acquire a lock.
      *
-     * If acquiring a lock fails, it uses a blocking connection waiting for the current
-     * client holding the lock to free it. If the other client crashes or doesn't free the lock, the returned
-     * promise will fail, because once having entered the blocking mode, it doesn't try to aquire a lock until
-     * another client frees the current lock. It can't react to key expires. You can call this method once again
-     * if you absolutely need it, but usually, it should only be required if another client misbehaves or crashes,
-     * which is clearly a bug then.
+     * If acquiring a lock fails, it uses a blocking connection waiting for the current client holding the lock to free
+     * it. If the other client crashes or doesn't free the lock, the returned promise will fail, because once having
+     * entered the blocking mode, it doesn't try to aquire a lock until another client frees the current lock. It can't
+     * react to key expires. You can call this method once again if you absolutely need it, but usually, it should only
+     * be required if another client misbehaves or crashes, which is clearly a bug then.
      *
      * @param string $id specific lock ID (every lock has its own ID).
      * @param string $token unique token (only has to be unique within other locking attempts with the same lock ID).
-     * @return Promise promise fails if lock couldn't be acquired, otherwise resolves to true.
+     *
+     * @return Promise Fails if lock couldn't be acquired, otherwise resolves to `true`.
      */
-    public function lock ($id, $token): Promise {
-        return pipe($this->std->eval(self::LOCK, ["lock:{$id}", "queue:{$id}"], [$token, $this->ttl]), function ($result) use ($id, $token) {
+    public function lock($id, $token): Promise {
+        return call(function () use ($id, $token) {
+            $result = yield $this->std->eval(self::LOCK, ["lock:{$id}", "queue:{$id}"], [$token, $this->ttl]);
+
             if ($result) {
                 return true;
-            } else {
-                return pipe($this->std->expire("queue:{$id}", $this->timeout * 2, true), function () use ($id, $token) {
-                    $connection = $this->getReadyConnection();
-                    $promise = $connection->brPoplPush("queue:{$id}", "lock:{$id}", $this->timeout);
-                    $promise->when(function () use ($connection) {
-                        $hash = spl_object_hash($connection);
-                        $key = $this->busyConnectionMap[$hash] ?? null;
+            }
 
-                        unset($this->busyConnections[$key]);
-                        unset($this->busyConnectionMap[$hash]);
+            yield $this->std->expire("queue:{$id}", $this->timeout * 2, true);
 
-                        $this->readyConnections[] = [time(), $connection];
-                    });
+            $connection = $this->getReadyConnection();
 
-                    return pipe($promise, function ($result) use ($id, $token) {
-                        if ($result === null) {
-                            return new Failure(new LockException);
-                        }
+            try {
+                $result = yield $connection->brPoplPush("queue:{$id}", "lock:{$id}", $this->timeout);
 
-                        return $this->std->eval(self::TOKEN, ["lock:{$id}"], [$token, $this->ttl]);
-                    });
-                });
+                if ($result === null) {
+                    return new Failure(new LockException);
+                }
+
+                return $this->std->eval(self::TOKEN, ["lock:{$id}"], [$token, $this->ttl]);
+            } finally {
+                $hash = spl_object_hash($connection);
+                $key = $this->busyConnectionMap[$hash] ?? null;
+                unset($this->busyConnections[$key], $this->busyConnectionMap[$hash]);
+                $this->readyConnections[] = [time(), $connection];
             }
         });
     }
@@ -206,7 +205,7 @@ RENEW;
      * @param string $token unique token provided during {@link lock()}.
      * @return Promise promise fails if lock couldn't be acquired, otherwise resolves normally.
      */
-    public function unlock ($id, $token): Promise {
+    public function unlock($id, $token): Promise {
         return $this->std->eval(self::UNLOCK, ["lock:{$id}", "queue:{$id}"], [$token, 2 * $this->timeout]);
     }
 
@@ -219,7 +218,7 @@ RENEW;
      * @param string $token unique token provided during {@link lock()}.
      * @return Promise promise fails if lock couldn't be renewed, otherwise resolves normally.
      */
-    public function renew ($id, $token): Promise {
+    public function renew($id, $token): Promise {
         return $this->std->eval(self::RENEW, ["lock:{$id}"], [$token, $this->ttl]);
     }
 
@@ -231,8 +230,9 @@ RENEW;
      *
      * @return Promise
      */
-    public function shutdown () : Promise {
-        cancel($this->watcher);
+    public function shutdown(): Promise {
+        Loop::cancel($this->watcher);
+
         $promises = [$this->std->close()];
 
         foreach ($this->busyConnections as $connection) {
@@ -251,7 +251,7 @@ RENEW;
      *
      * @return int TTL in milliseconds.
      */
-    public function getTTL () {
+    public function getTtl() {
         return $this->ttl;
     }
 
@@ -260,7 +260,7 @@ RENEW;
      *
      * @return int timeout in milliseconds.
      */
-    public function getTimeout () {
+    public function getTimeout() {
         return $this->timeout;
     }
 }

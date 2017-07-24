@@ -1,19 +1,20 @@
 <?php
 
-namespace Amp\Redis;
+namespace Kelunik\RedisMutex\Test;
 
-use Amp\NativeReactor;
-use Amp\Pause;
-use PHPUnit_Framework_TestCase;
-use function Amp\stop;
+use Amp\Delayed;
+use Amp\Loop;
+use Amp\Redis\Client;
+use Kelunik\RedisMutex\Mutex;
+use PHPUnit\Framework\TestCase;
 
-class MutexTest extends PHPUnit_Framework_TestCase {
+class MutexTest extends TestCase {
     /**
      * @before
      */
-    public function setUp () {
-        (new NativeReactor())->run(function ($reactor) {
-            $client = new Client("tcp://127.0.0.1:6379", [], $reactor);
+    public function setUp() {
+        Loop::run(function () {
+            $client = new Client("tcp://127.0.0.1:6379");
             yield $client->flushAll();
             yield $client->close();
         });
@@ -22,15 +23,16 @@ class MutexTest extends PHPUnit_Framework_TestCase {
     /**
      * @test
      */
-    public function timeout () {
-        (new NativeReactor())->run(function ($reactor) {
-            $mutex = new Mutex("tcp://127.0.0.1:6379", [], $reactor);
+    public function timeout() {
+        Loop::run(function () {
+            $mutex = new Mutex("tcp://127.0.0.1:6379");
 
             yield $mutex->lock("foo1", "123456789");
 
             try {
                 yield $mutex->lock("foo1", "234567891");
             } catch (\Exception $e) {
+                $this->assertTrue(true);
                 return;
             } finally {
                 $mutex->shutdown();
@@ -43,14 +45,14 @@ class MutexTest extends PHPUnit_Framework_TestCase {
     /**
      * @test
      */
-    public function free () {
-        (new NativeReactor())->run(function ($reactor) {
-            $mutex = new Mutex("tcp://127.0.0.1:6379", [], $reactor);
+    public function free() {
+        Loop::run(function () {
+            $mutex = new Mutex("tcp://127.0.0.1:6379");
 
             yield $mutex->lock("foo2", "123456789");
 
-            $pause = new Pause(500, $reactor);
-            $pause->when(function () use ($mutex) {
+            $pause = new Delayed(500);
+            $pause->onResolve(function () use ($mutex) {
                 $mutex->unlock("foo2", "123456789");
             });
 
@@ -59,21 +61,22 @@ class MutexTest extends PHPUnit_Framework_TestCase {
             yield $mutex->lock("foo2", "234567891");
 
             $mutex->shutdown();
+            $this->assertTrue(true);
         });
     }
 
     /**
      * @test
      */
-    public function renew () {
-        (new NativeReactor())->run(function ($reactor) {
-            $mutex = new Mutex("tcp://127.0.0.1:6379", [], $reactor);
+    public function renew() {
+        Loop::run(function () {
+            $mutex = new Mutex("tcp://127.0.0.1:6379");
 
             yield $mutex->lock("foo3", "123456789");
 
             for ($i = 0; $i < 5; $i++) {
-                $pause = new Pause(500, $reactor);
-                $pause->when(function () use ($mutex) {
+                $pause = new Delayed(500);
+                $pause->onResolve(function () use ($mutex) {
                     $mutex->renew("foo3", "123456789");
                 });
 
@@ -83,6 +86,7 @@ class MutexTest extends PHPUnit_Framework_TestCase {
             try {
                 yield $mutex->lock("foo3", "234567891");
             } catch (\Exception $e) {
+                $this->assertTrue(true);
                 return;
             } finally {
                 $mutex->shutdown();

@@ -1,7 +1,6 @@
 <?php
 
-namespace Amp\Redis;
+namespace Kelunik\RedisMutex;
 
 class LockException extends MutexException {
-
 }

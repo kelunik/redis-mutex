@@ -1,21 +1,22 @@
 {
-  "name": "kelunik/redis-mutex",
-  "license": "MIT",
-  "authors": [
-    {
-      "name": "Niklas Keller",
-      "email": "me@kelunik.com"
+    "name": "kelunik/redis-mutex",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Niklas Keller",
+            "email": "me@kelunik.com"
+        }
+    ],
+    "autoload": {
+        "psr-4": {
+            "Kelunik\\RedisMutex\\": "src"
+        }
+    },
+    "require": {
+        "amphp/redis": "^0.3"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^6",
+        "friendsofphp/php-cs-fixer": "^2.3"
     }
-  ],
-  "require": {
-    "amphp/redis": "^0.2"
-  },
-  "require-dev": {
-    "phpunit/phpunit": "^4.8"
-  },
-  "autoload": {
-    "psr-4": {
-      "Amp\\Redis\\": "lib"
-    }
-  }
 }

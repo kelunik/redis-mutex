@@ -1,9 +1,8 @@
 <?php
 
-namespace Amp\Redis;
+namespace Kelunik\RedisMutex;
 
 use Exception;
 
 class MutexException extends Exception {
-
 }
