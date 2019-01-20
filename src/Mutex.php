@@ -104,19 +104,26 @@ RENEW;
         $this->busyConnections = [];
         $this->busyConnectionMap = [];
 
-        $this->watcher = Loop::repeat(5000, function () {
+        $readyConnections = &$this->readyConnections;
+        $this->watcher = Loop::repeat(5000, static function () use (&$readyConnections) {
             $now = \time();
             $unused = $now - 60;
 
-            foreach ($this->readyConnections as $key => list($time, $connection)) {
+            foreach ($readyConnections as $key => list($time, $connection)) {
                 if ($time > $unused) {
                     break;
                 }
 
-                unset($this->readyConnections[$key]);
+                unset($readyConnections[$key]);
                 $connection->close();
             }
         });
+
+        Loop::unreference($this->watcher);
+    }
+
+    public function __destruct() {
+        $this->shutdown();
     }
 
     /**
